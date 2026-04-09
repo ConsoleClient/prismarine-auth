@@ -10,6 +10,10 @@ class LiveTokenManager {
     this.cache = cache
   }
 
+  _doFetch (url, opts) {
+    return (this._fetch || fetch)(url, opts)
+  }
+
   async verifyTokens () {
     if (this.forceRefresh) try { await this.refreshTokens() } catch { }
     const at = await this.getAccessToken()
@@ -25,7 +29,7 @@ class LiveTokenManager {
         await this.refreshTokens()
         return true
       } catch (e) {
-        console.warn('Error refreshing token', e) // TODO: looks like an error happens here
+        console.warn('Error refreshing token', e)
         return false
       }
     }
@@ -43,10 +47,10 @@ class LiveTokenManager {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      credentials: 'include' // This cookie handler does not work on node-fetch ...
+      credentials: 'include'
     }
 
-    const token = await fetch(Endpoints.live.tokenRequest, codeRequest).then(checkStatus)
+    const token = await this._doFetch(Endpoints.live.tokenRequest, codeRequest).then(checkStatus)
     this.updateCache(token)
     return token
   }
@@ -84,14 +88,14 @@ class LiveTokenManager {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      credentials: 'include' // This cookie handler does not work on node-fetch ...
+      credentials: 'include'
     }
 
     debug('Requesting live device token', codeRequest)
 
     const cookies = []
 
-    const res = await fetch(Endpoints.live.deviceCodeRequest, codeRequest)
+    const res = await this._doFetch(Endpoints.live.deviceCodeRequest, codeRequest)
       .then(res => {
         if (res.status !== 200) {
           res.text().then(console.warn)
@@ -109,7 +113,7 @@ class LiveTokenManager {
         deviceCodeCallback(resp)
         return resp
       })
-    const expireTime = acquireTime + (res.expires_in * 1000) - 100 /* for safety */
+    const expireTime = acquireTime + (res.expires_in * 1000) - 100
 
     this.polling = true
     while (this.polling && expireTime > Date.now()) {
@@ -128,7 +132,7 @@ class LiveTokenManager {
           }).toString()
         }
 
-        const token = await fetch(Endpoints.live.tokenRequest + '?client_id=' + this.clientId, verifi)
+        const token = await this._doFetch(Endpoints.live.tokenRequest + '?client_id=' + this.clientId, verifi)
           .then(res => res.json()).then(res => {
             if (res.error) {
               if (res.error === 'authorization_pending') {

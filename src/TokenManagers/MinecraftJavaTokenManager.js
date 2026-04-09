@@ -32,6 +32,10 @@ class MinecraftJavaTokenManager {
     this.cache = cache
   }
 
+  _doFetch (url, opts) {
+    return (this._fetch || fetch)(url, opts)
+  }
+
   async getCachedAccessToken () {
     const { mca: token } = await this.cache.getCached()
     debug('[mc] token cache', token)
@@ -65,7 +69,7 @@ class MinecraftJavaTokenManager {
 
   async getAccessToken (xsts) {
     debug('[mc] authing to minecraft', xsts)
-    const MineServicesResponse = await fetch(Endpoints.minecraftJava.loginWithXbox, {
+    const MineServicesResponse = await this._doFetch(Endpoints.minecraftJava.loginWithXbox, {
       method: 'post',
       ...fetchOptions,
       body: JSON.stringify({ identityToken: `XBL3.0 x=${xsts.userHash};${xsts.XSTSToken}` })
@@ -79,21 +83,16 @@ class MinecraftJavaTokenManager {
   async fetchProfile (accessToken) {
     debug(`[mc] fetching minecraft profile with ${accessToken.slice(0, 16)}`)
     const headers = { ...fetchOptions.headers, Authorization: `Bearer ${accessToken}` }
-    const profile = await fetch(Endpoints.minecraftJava.profile, { headers })
+    const profile = await this._doFetch(Endpoints.minecraftJava.profile, { headers })
       .then(checkStatus)
     debug(`[mc] got profile response: ${profile}`)
     return profile
   }
 
-  /**
- * Fetches any product licenses attached to this accesstoken
- * @param {string} accessToken
- * @returns {object}
- */
   async fetchEntitlements (accessToken) {
     debug(`[mc] fetching entitlements with ${accessToken.slice(0, 16)}`)
     const headers = { ...fetchOptions.headers, Authorization: `Bearer ${accessToken}` }
-    const entitlements = await fetch(Endpoints.minecraftJava.entitlements + `?requestId=${crypto.randomUUID()}`, { headers }).then(checkStatus)
+    const entitlements = await this._doFetch(Endpoints.minecraftJava.entitlements + `?requestId=${crypto.randomUUID()}`, { headers }).then(checkStatus)
     debug(`[mc] got entitlement response: ${entitlements}`)
     return entitlements
   }
@@ -101,7 +100,7 @@ class MinecraftJavaTokenManager {
   async fetchCertificates (accessToken) {
     debug(`[mc] fetching key-pair with ${accessToken.slice(0, 16)}`)
     const headers = { ...fetchOptions.headers, Authorization: `Bearer ${accessToken}` }
-    const cert = await fetch(Endpoints.minecraftJava.certificates, { method: 'post', headers }).then(checkStatus)
+    const cert = await this._doFetch(Endpoints.minecraftJava.certificates, { method: 'post', headers }).then(checkStatus)
     debug('[mc] got key-pair')
     const profileKeys = {
       publicPEM: cert.keyPair.publicKey,
@@ -125,7 +124,6 @@ class MinecraftJavaTokenManager {
     const id = report.id || Date.now()
     const reportedMessagesCount = report.message.reduce((acc, cur) => { acc += (cur.reported ? 1 : 0); return acc }, 0)
 
-    // Some basic client-side sanity checks to replicate vanilla behavior as server does not explain errors
     if (report.comments > reportLimits.maxOpinionCommentsLength) throw Error(`Report comment is too long, max allowed length is ${reportLimits.maxOpinionCommentsLength}`)
     if (!report.messages.length) throw Error('No messages were provided as evidence for report')
     if (report.messages.length > reportLimits.report.maxEvidenceMessageCount) throw Error(`Too many messages provided as evidence, max allowed is ${reportLimits.maxEvidenceMessageCount}`)
@@ -157,7 +155,7 @@ class MinecraftJavaTokenManager {
                   message: e.message
                 }
               : null,
-            overridenMessage: e.originalMessage, // if it was modified by the server, ChatTrustLevel.java
+            overridenMessage: e.originalMessage,
             messageReported: e.reported
           }
         }),
@@ -176,7 +174,7 @@ class MinecraftJavaTokenManager {
     }
 
     debug('[mc] reporting player with payload', body)
-    const reportResponse = await fetch(Endpoints.minecraftJava.reportPlayer, { method: 'post', headers, body }).then(checkStatus)
+    const reportResponse = await this._doFetch(Endpoints.minecraftJava.reportPlayer, { method: 'post', headers, body }).then(checkStatus)
     debug('[mc] server response for report', reportResponse)
     return true
   }

@@ -28,6 +28,28 @@ async function retry (methodFn, beforeRetry, times) {
   }
 }
 
+function buildProxyFetch (agent) {
+  if (!agent) return null
+  let proxyUrl = ''
+  if (agent.__ccProxyMeta) {
+    const m = agent.__ccProxyMeta
+    const hasAuth = m.username || m.password
+    const auth = hasAuth ? `${encodeURIComponent(m.username || '')}:${encodeURIComponent(m.password || '')}@` : ''
+    proxyUrl = `${m.scheme || 'http'}://${auth}${m.host}:${m.port}`
+  } else if (agent.__ccProxyUrl) {
+    proxyUrl = agent.__ccProxyUrl
+  }
+  if (!proxyUrl) return null
+  try {
+    const { ProxyAgent } = require('undici')
+    const dispatcher = new ProxyAgent(proxyUrl)
+    return (url, opts) => fetch(url, { ...opts, dispatcher })
+  } catch (e) {
+    debug('[proxy] undici proxy setup failed:', e.message)
+    return null
+  }
+}
+
 const CACHE_IDS = ['msal', 'live', 'sisu', 'xbl', 'bed', 'mca', 'mcs', 'pfb']
 
 class MicrosoftAuthFlow {
@@ -39,6 +61,16 @@ class MicrosoftAuthFlow {
     this.options = options || { flow: 'live', authTitle: Titles.MinecraftNintendoSwitch }
     this.initTokenManagers(username, cache, options?.forceRefresh)
     this.codeCallback = codeCallback
+
+    const pFetch = buildProxyFetch(this.options.agent)
+    if (pFetch) {
+      if (this.msa) this.msa._fetch = pFetch
+      if (this.xbl) this.xbl._fetch = pFetch
+      if (this.mca) this.mca._fetch = pFetch
+      if (this.mba) this.mba._fetch = pFetch
+      if (this.mcs) this.mcs._fetch = pFetch
+      if (this.pfb) this.pfb._fetch = pFetch
+    }
   }
 
   initTokenManagers (username, cache, forceRefresh) {
@@ -108,7 +140,7 @@ class MicrosoftAuthFlow {
 
       if (ret.account) {
         console.info(`[msa] Signed in as ${ret.account.username}`)
-      } else { // We don't get extra account data here per scope
+      } else {
         console.info('[msa] Signed in with Microsoft')
       }
 
@@ -158,7 +190,6 @@ class MicrosoftAuthFlow {
     return await retry(async () => {
       const msaToken = await this.getMsaToken()
 
-      // sisu flow generates user and title tokens differently to other flows and should also be used to refresh them if they are invalid
       if (options.flow === 'sisu' && (!userToken.valid || !deviceToken.valid || !titleToken.valid)) {
         debug(`[xbl] Sisu flow selected, trying to authenticate with authTitle ID ${options.authTitle}`)
         const dt = await this.xbl.getDeviceToken(options)
@@ -207,8 +238,6 @@ class MicrosoftAuthFlow {
   }
 
   async getMinecraftBedrockChain (publicKey) {
-    // TODO: Fix cache, in order to do cache we also need to cache the ECDH keys so disable it
-    // is this even a good idea to cache?
     if (await this.mba.verifyTokens() && false) { // eslint-disable-line
       debug('[mc] Using existing tokens')
       const { chain } = await this.mba.getCachedAccessToken()
@@ -220,7 +249,6 @@ class MicrosoftAuthFlow {
         const xsts = await this.getXboxToken(Endpoints.minecraftBedrock.XSTSRelyingParty)
         debug('[xbl] xsts data', xsts)
         const token = await this.mba.getAccessToken(publicKey, xsts)
-        // If we want to auth with a title ID, make sure there's a TitleID in the response
         const body = JSON.parse(Buffer.from(token.chain[1].split('.')[1], 'base64').toString())
         if (!body.extraData.titleId && this.doTitleAuth) {
           throw Error('missing titleId in response')
